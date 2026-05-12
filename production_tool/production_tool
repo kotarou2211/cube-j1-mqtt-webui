@@ -14,11 +14,7 @@ start adbd
 cp $PT/wpa_supplicant.conf /data/misc/wifi/wpa_supplicant.conf
 chmod 660 /data/misc/wifi/wpa_supplicant.conf
 chown system:wifi /data/misc/wifi/wpa_supplicant.conf
-
-# restart Wi-Fi
-svc wifi disable
-sleep 2
-svc wifi enable
+wpa_cli -p /data/misc/wifi/sockets -i wlan0 reconfigure
 sleep 5
 
 # ── Install MQTT bridge (persistent, survives USB removal) ────────────────────
@@ -53,4 +49,4 @@ start mqtt_ha_bridge
 # ── Finish LED (blink white) ───────────────────────────────────────────────
 cp $PT/led_effect.sh /data/local/led_effect.sh
 chmod 755 /data/local/led_effect.sh
-/data/local/led_effect.sh blink * 10
+/data/local/led_effect.sh blink white 10
