@@ -53,4 +53,4 @@ start mqtt_ha_bridge
 # ── Finish LED (blink white) ───────────────────────────────────────────────
 cp $PT/led_effect.sh /data/local/led_effect.sh
 chmod 755 /data/local/led_effect.sh
-/data/local/led_effect.sh blink * 10
+/data/local/led_effect.sh blink white 10
