@@ -14,11 +14,7 @@ start adbd
 cp $PT/wpa_supplicant.conf /data/misc/wifi/wpa_supplicant.conf
 chmod 660 /data/misc/wifi/wpa_supplicant.conf
 chown system:wifi /data/misc/wifi/wpa_supplicant.conf
-
-# restart Wi-Fi
-svc wifi disable
-sleep 2
-svc wifi enable
+wpa_cli -p /data/misc/wifi/sockets -i wlan0 reconfigure
 sleep 5
 
 # ── Install MQTT bridge (persistent, survives USB removal) ────────────────────
