@@ -36,6 +36,11 @@ cp $PT/ndeclite_disabled.rc /system/etc/init/ndeclite_agent.rc
 # install our MQTT bridge as an init service (auto-start on next boot)
 cp $PT/mqtt_ha_bridge.rc /system/etc/init/mqtt_ha_bridge.rc
 
+# install web config panel (lets you change Wi-Fi / meter settings from a browser)
+cp $PT/config_web.py /data/local/config_web.py
+chmod 755 /data/local/config_web.py
+cp $PT/config_web.rc /system/etc/init/config_web.rc
+
 # ── Stop conflicting services immediately ──────────────────────────────────────
 stop wisund
 stop NDEcLiteAgent
@@ -45,6 +50,11 @@ sleep 2
 stop mqtt_ha_bridge 2>/dev/null || true
 sleep 1
 start mqtt_ha_bridge
+
+# ── Start web config panel (http://<cube-ip>:8080/) ───────────────────────────
+stop config_web 2>/dev/null || true
+sleep 1
+start config_web
 
 # ── Finish LED (blink white) ───────────────────────────────────────────────
 cp $PT/led_effect.sh /data/local/led_effect.sh
