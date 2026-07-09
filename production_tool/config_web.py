@@ -26,6 +26,12 @@ LOG_PATH    = "/data/local/mqtt_bridge.log"
 WPA_SOCKETS = "/data/misc/wifi/sockets"
 LISTEN_PORT = 8080
 
+# Cube J1's built-in Wi-Fi Direct "CubeJ-XXXXXX" access point (p2p-wlan0-0)
+# always comes up on this fixed address, regardless of whether wlan0 has
+# joined a home network yet. Requests arriving on this address are from a
+# phone/PC connected to that setup AP rather than the home LAN.
+SETUP_AP_IP = "192.168.100.1"
+
 # config.json keys shown on the page, with (label, is_secret, help)
 CONFIG_FIELDS = [
     ("br_id",         u"Bルート認証ID",        False, u"電力会社発行の32文字ID"),
@@ -154,6 +160,7 @@ PAGE = u"""<!doctype html>
      overflow:auto;font-size:11px;max-height:320px;}
 </style></head><body>
 <h1>Cube J1 MQTT 設定</h1>
+{{APNOTE}}
 {{MSG}}
 <div class="card">
  <h2>Wi-Fi 設定</h2>
@@ -187,7 +194,16 @@ PAGE = u"""<!doctype html>
 </body></html>"""
 
 
-def render(msg_html=""):
+AP_NOTE = (
+    u'<div class="warn">'
+    u'セットアップ用アクセスポイント（<b>CubeJ-XXXXXX</b>）経由で接続しています。'
+    u'下の「Wi-Fi 設定」に自宅の Wi-Fi の SSID とパスワードを入力して保存すると、'
+    u'本体が自宅 Wi-Fi への接続を試みます（成功すると本体 LED が緑色に点灯します）。'
+    u'</div>'
+)
+
+
+def render(msg_html="", via_setup_ap=False):
     cfg = load_config()
     ssid, psk = read_wifi()
     rows = []
@@ -198,6 +214,7 @@ def render(msg_html=""):
             u'<div class="hint">%s</div>'
             % (esc(label), esc(key), esc(val), esc(help_text)))
     html = (PAGE
+            .replace("{{APNOTE}}", AP_NOTE if via_setup_ap else u"")
             .replace("{{MSG}}", msg_html)
             .replace("{{SSID}}", esc(ssid))
             .replace("{{PSK}}", esc(psk))
@@ -217,6 +234,13 @@ def msg_box(text, warn=False):
 
 class Handler(BaseHTTPServer.BaseHTTPRequestHandler):
     server_version = "CubeJ1Config/1.0"
+
+    def _via_setup_ap(self):
+        """True if this request came in on the CubeJ-XXXXXX setup AP interface."""
+        try:
+            return self.connection.getsockname()[0] == SETUP_AP_IP
+        except Exception:
+            return False
 
     def _auth_ok(self):
         cfg = load_config()
@@ -262,12 +286,13 @@ class Handler(BaseHTTPServer.BaseHTTPRequestHandler):
         if self.path.split("?")[0] not in ("/", "/index.html"):
             self._send_html(b"Not found", 404)
             return
-        self._send_html(render())
+        self._send_html(render(via_setup_ap=self._via_setup_ap()))
 
     def do_POST(self):
         if not self._auth_ok():
             return
         form = self._read_post()
+        via_ap = self._via_setup_ap()
 
         def g(name):
             v = form.get(name, [""])
@@ -277,7 +302,10 @@ class Handler(BaseHTTPServer.BaseHTTPRequestHandler):
         try:
             if path == "/save_wifi":
                 write_wifi(g("ssid"), g("psk"))
-                self._send_html(render(msg_box(u"Wi-Fi設定を保存し、再接続を要求しました。")))
+                self._send_html(render(
+                    msg_box(u"Wi-Fi設定を保存しました。自宅Wi-Fiへの接続を試みています"
+                            u"（成功すると本体LEDが緑色に点灯します）。"),
+                    via_setup_ap=via_ap))
                 return
             if path == "/save_config":
                 cfg = load_config()
@@ -293,15 +321,18 @@ class Handler(BaseHTTPServer.BaseHTTPRequestHandler):
                 restart_bridge()
                 self._send_html(render(
                     msg_box(u"設定を保存し、ブリッジを再起動しました。"
-                            u"メーター再接続に約1分かかります。")))
+                            u"メーター再接続に約1分かかります。"),
+                    via_setup_ap=via_ap))
                 return
             if path == "/reboot":
-                self._send_html(render(msg_box(u"本体を再起動します...", warn=True)))
+                self._send_html(render(msg_box(u"本体を再起動します...", warn=True),
+                                        via_setup_ap=via_ap))
                 os.system("sync")
                 os.system("reboot")
                 return
         except Exception as e:
-            self._send_html(render(msg_box(u"エラー: %s" % e, warn=True)))
+            self._send_html(render(msg_box(u"エラー: %s" % e, warn=True),
+                                    via_setup_ap=via_ap))
             return
         self._send_html(b"Not found", 404)
 
