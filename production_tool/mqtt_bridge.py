@@ -180,7 +180,7 @@ def skcommand(fd, cmd, timeout=10):
 # Scan settings
 # ---------------------------------------------------------------------------
 
-SCAN_DURATION_BASE = 4
+SCAN_DURATION_BASE = 7
 SCAN_RETRY_LIMIT = 10
 
 # ---------------------------------------------------------------------------
@@ -201,8 +201,7 @@ def skscan(fd):
 
         pan_list  = []
         current   = {}
-        scan_done = False
-        deadline  = time.time() + duration
+        deadline  = time.time() + 60
         while time.time() < deadline:
             line = serial_readline(fd, timeout=2)
             if line is None:
@@ -214,7 +213,6 @@ def skscan(fd):
             elif line.startswith("EVENT 22"):
                 if current:
                     pan_list.append(current)
-                scan_done = True
                 break  # Exit loop once EVENT 22 received
             elif ":" in line and not line.startswith("EVENT"):
                 key, _, val = line.strip().partition(":")
@@ -735,7 +733,8 @@ def main():
     coeff     = 1
     unit_kwh  = 1.0
     last_ping = time.time()
-
+    consecutive_timeouts = 0
+    
     while True:
         try:
             orig_led = led_read()
@@ -745,6 +744,7 @@ def main():
                 tid = (tid + 1) & 0xFFFF
                 data = read_erxudp(fd, timeout=15)
                 if data:
+                    consecutive_timeouts = 0
                     props = parse_el_response(data)
                     m     = decode_measurements(props)
                     m     = apply_energy_scale(m, coeff, unit_kwh)
@@ -758,7 +758,12 @@ def main():
                                    "current_r_a", "current_t_a")}))
                     publish_measurements(mqtt, device_id, m)
                 else:
-                    log("No ERXUDP response (timeout)")
+                    consecutive_timeouts += 1
+                    log("No ERXUDP response (timeout) count={}".format(consecutive_timeouts))
+
+                    if consecutive_timeouts >= 3:
+                        raise RuntimeError("No ERXUDP response 3 times")
+    
             finally:
                 led_rgb(*orig_led)
 
@@ -769,13 +774,18 @@ def main():
             time.sleep(poll_interval)
 
         except Exception as e:
-            log("Main loop error: {} - reconnecting Wi-SUN in 30s".format(e))
-            time.sleep(30)
-            try:
-                ipv6 = wisun_connect(fd, br_id, br_pwd)
-                log("Wi-SUN reconnected at {}".format(ipv6))
-            except Exception as e2:
-                log("Wi-SUN reconnect failed: {}".format(e2))
+            log("Main loop error: {} - reconnecting Wi-SUN".format(e))
+
+            while True:
+                try:
+                    time.sleep(30)
+                    ipv6 = wisun_connect(fd, br_id, br_pwd)
+                    consecutive_timeouts = 0
+                    log("Wi-SUN reconnected at {}".format(ipv6))
+                    break
+                except Exception as e2:
+                    log("Wi-SUN reconnect failed: {} - retry in 60s".format(e2))
+                    time.sleep(60)
 
 
 if __name__ == "__main__":
