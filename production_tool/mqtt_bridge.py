@@ -744,19 +744,31 @@ def main():
                 tid = (tid + 1) & 0xFFFF
                 data = read_erxudp(fd, timeout=15)
                 if data:
-                    consecutive_timeouts = 0
                     props = parse_el_response(data)
                     m     = decode_measurements(props)
-                    m     = apply_energy_scale(m, coeff, unit_kwh)
-                    if "coefficient" in m:
-                        coeff = m["coefficient"]
-                    if "unit_kwh" in m:
-                        unit_kwh = m["unit_kwh"]
-                    log("Measurements: {}".format(
-                        {k: v for k, v in m.items()
-                         if k in ("power_w", "energy_forward_kwh", "energy_reverse_kwh",
-                                   "current_r_a", "current_t_a")}))
-                    publish_measurements(mqtt, device_id, m)
+
+                    if "power_w" not in m:
+                        # フレームは届いたが、Get_SNA(エラー応答)や項目欠落で
+                        # 有効な瞬時電力が取れなかったケース。無応答と同様に
+                        # 異常としてカウントしないと、pingだけ生き続けて
+                        # データ配信だけが永久に止まる状態を検知できない。
+                        consecutive_timeouts += 1
+                        log("ERXUDP received but no power_w decoded (props={}) count={}".format(
+                            list(props.keys()), consecutive_timeouts))
+                        if consecutive_timeouts >= 3:
+                            raise RuntimeError("No valid power_w 3 times")
+                    else:
+                        consecutive_timeouts = 0
+                        m = apply_energy_scale(m, coeff, unit_kwh)
+                        if "coefficient" in m:
+                            coeff = m["coefficient"]
+                        if "unit_kwh" in m:
+                            unit_kwh = m["unit_kwh"]
+                        log("Measurements: {}".format(
+                            {k: v for k, v in m.items()
+                             if k in ("power_w", "energy_forward_kwh", "energy_reverse_kwh",
+                                       "current_r_a", "current_t_a")}))
+                        publish_measurements(mqtt, device_id, m)
                 else:
                     consecutive_timeouts += 1
                     log("No ERXUDP response (timeout) count={}".format(consecutive_timeouts))
