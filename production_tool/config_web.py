@@ -19,6 +19,7 @@ import re
 import json
 import base64
 import BaseHTTPServer
+import SocketServer
 
 CONFIG_PATH = "/data/local/config.json"
 WPA_PATH    = "/data/misc/wifi/wpa_supplicant.conf"
@@ -120,7 +121,8 @@ def tail_log(n=100):
     try:
         with open(LOG_PATH) as f:
             lines = f.readlines()
-        return "".join(lines[-n:])
+        raw = "".join(lines[-n:])
+        return raw.decode("utf-8", "replace")
     except Exception:
         return u"(ログはまだありません)"
 
@@ -130,7 +132,12 @@ def tail_log(n=100):
 # ---------------------------------------------------------------------------
 
 def esc(s):
-    s = u"%s" % s
+    # ログや設定値にUTF-8の生バイト列(非ASCII)が混じっていると、
+    # 暗黙のASCIIデコード(u"%s" % s)でクラッシュするため明示的にデコードする。
+    if isinstance(s, str):
+        s = s.decode("utf-8", "replace")
+    else:
+        s = unicode(s)
     return (s.replace(u"&", u"&amp;").replace(u"<", u"&lt;")
              .replace(u">", u"&gt;").replace(u'"', u"&quot;"))
 
@@ -234,6 +241,10 @@ def msg_box(text, warn=False):
 
 class Handler(BaseHTTPServer.BaseHTTPRequestHandler):
     server_version = "CubeJ1Config/1.0"
+    # 接続だけ確立してデータを送らないクライアント(ポートスキャン等)が
+    # あると、タイムアウト無指定のままではrfile読み取りで無期限にブロック
+    # し、シングルスレッドのHTTPServerだと以降誰も繋げなくなる。
+    timeout = 15
 
     def _via_setup_ap(self):
         """True if this request came in on the CubeJ-XXXXXX setup AP interface."""
@@ -337,8 +348,14 @@ class Handler(BaseHTTPServer.BaseHTTPRequestHandler):
         self._send_html(b"Not found", 404)
 
 
+class ThreadingHTTPServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
+    # 1接続が固まっても他のリクエストをブロックしないようにスレッド化する。
+    daemon_threads = True
+    allow_reuse_address = True
+
+
 def main():
-    httpd = BaseHTTPServer.HTTPServer(("0.0.0.0", LISTEN_PORT), Handler)
+    httpd = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), Handler)
     httpd.serve_forever()
 
 
